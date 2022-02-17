@@ -1,29 +1,66 @@
-from asyncio.windows_events import NULL
-from concurrent.futures import thread
-from pickle import FALSE
 from PyQt5 import QtCore, QtWidgets, uic
 from PyQt5.QtGui import QPixmap, QIcon
-from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 
-import time, datetime
-import sys
-import pyaudio
-import wave
+import datetime, sys, pyaudio, wave, threading, atexit, numpy as np
 
-class Record(QtCore.QThread):
+class MicrophoneRecorder(object):
 
-    finished = QtCore.pyqtSignal()
-    progress = QtCore.pyqtSignal()
-    isRunning = False
-   
-    @pyqtSlot()
-    def run(self):
-        if not self.isRunning:
-            self.isRunning = True
-            self.progress.emit()
-        else:
-            self.isRunning = False
-            self.finished.emit()
+    
+    def __init__(self, rate=44100, chunksize=1024):
+        self.rate = rate
+        self.chunksize = chunksize
+        self.p = pyaudio.PyAudio()
+        self.stream = self.p.open(format=pyaudio.paInt16,
+                                  channels=1,
+                                  rate=self.rate,
+                                  input=True,
+                                  frames_per_buffer=self.chunksize,
+                                  stream_callback=self.new_frame)
+        self.lock = threading.Lock()
+        self.stop = False
+        self.frames = []
+        atexit.register(self.close)
+
+
+    def new_frame(self, data, frame_count, time_info, status):
+        #data = np.fromstring(data, 'int16')
+        data = np.frombuffer(data, 'int16')
+        with self.lock:
+            self.frames.append(data)
+            if self.stop:
+                return None, pyaudio.paComplete
+        return None, pyaudio.paContinue
+    
+
+    def get_frames(self):
+        with self.lock:
+            frames = self.frames
+            self.frames = []
+            return frames
+    
+
+    def start(self):
+        # Очистка ранее записанных аудио
+        self.frames = []
+        # Запуск потока
+        self.stream.start_stream()
+
+
+    def close(self):
+        # Остановка записи
+        with self.lock:
+            self.stop = True
+        self.stream.stop_stream()
+        self.stream.close()
+        self.p.terminate()
+        # Сохранение записи
+        wf = wave.open("output_sound.wav", 'wb')
+        wf.setnchannels(1)
+        wf.setsampwidth(self.p.get_sample_size(pyaudio.paInt16))
+        wf.setframerate(44100)
+        wf.writeframes(b''.join(self.get_frames()))
+        wf.close()
+
 
 class Dictaphone(QtWidgets.QMainWindow):
 
@@ -31,8 +68,8 @@ class Dictaphone(QtWidgets.QMainWindow):
     time_minutes = 0
     time_seconds = 0
 
-    def __init__(self, parent=None):
-        super(Dictaphone, self).__init__(parent)# Для доступа к форме
+    def __init__(self):
+        super(Dictaphone, self).__init__()# Для доступа к форме
         uic.loadUi('form.ui', self) # Загрузка Ui
 
         # Настройка формы
@@ -51,9 +88,9 @@ class Dictaphone(QtWidgets.QMainWindow):
         #self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         
         # Создание потока для записи звука
-        self.record_new = Record()
-        self.record_new.progress.connect(self.record_audio)
-        self.record_new.finished.connect(self.record_new.deleteLater)
+        #self.record_new = Record()
+        #self.record_new.progress.connect(self.record_audio)
+        #self.record_new.finished.connect(self.record_new.deleteLater)
         #thread_new = QThread()
         #record_new.moveToThread(thread_new)
         #thread_new.started.connect(record_new.run)  
@@ -67,7 +104,7 @@ class Dictaphone(QtWidgets.QMainWindow):
         self.pushButton_play.clicked.connect(self.play_audio)
         self.pushButton_record.setIcon(QIcon("icons/record.png"))
         self.pushButton_record.clicked.connect(lambda: self.start_time_record(timer))
-        self.pushButton_record.clicked.connect(lambda: self.record_new.start())
+        self.pushButton_record.clicked.connect(lambda: self.start_record_audio())
         self.pushButton_pause.setIcon(QIcon("icons/pause.png"))
         self.pushButton_pause.clicked.connect(lambda: self.pause_audio(timer))
         self.pushButton_delete.setIcon(QIcon("icons/bin.png"))
@@ -76,11 +113,6 @@ class Dictaphone(QtWidgets.QMainWindow):
         self.widget_play.hide() # Скрытиеэкрана воспроизведения записи
         self.label_record.setText(str(datetime.time(self.time_hours, self.time_minutes, self.time_seconds))) # Установка пустого таймера
         
-    
-
-    def start_thread(self):
-        pass
-
 
     def start_time_record(self, timer):
         # Обнуление счётчиков
@@ -110,41 +142,14 @@ class Dictaphone(QtWidgets.QMainWindow):
 
     
     # Запись файла
-    def record_audio(self):
-        p = pyaudio.PyAudio()
-        chunk = 1024 # Запись кусками по 1024 сэмпла
-        sample_format = pyaudio.paInt16 # 16 бит на выборку
-        channels = 2
-        rate = 44100 # Запись со скоростью 44100 выборок(samples) в секунду
-        seconds = 10
-
-        stream = p.open(format=sample_format,# 16 бит на выборку
-                        channels=channels,# двухканальная
-                        rate=rate,# запись со скоростью 44100 выборок в секунду
-                        frames_per_buffer=chunk,# запись кусками по 1024 сэмпла
-                        input_device_index=1,# индекс микрофона
-                        input=True)# разрешить запись 
-
-        frames = [] # список для хранения кадров
-
-        # Хранить данные в блоках в течении 3 секунд
-        for i in range(0, int(rate/chunk * seconds)):
-            data = stream.read(1024)
-            frames.append(data)
-
-        # Остановить и закрыть поток
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
-        self.label_record.setText("Запись окончена!")
-
-        # Сохранить записанные данные в виде файла wav
-        wf = wave.open("output_sound.wav", 'wb')
-        wf.setnchannels(channels)
-        wf.setsampwidth(p.get_sample_size(sample_format))
-        wf.setframerate(44100)
-        wf.writeframes(b''.join(frames))
-        wf.close()
+    def start_record_audio(self):
+        if(self.pushButton_record.styleSheet() == "border: 3px solied black;"):
+            self.mic.close()
+            self.pushButton_record.setStyleSheet("")
+        else:
+            self.mic = MicrophoneRecorder()
+            self.mic.start()
+            self.pushButton_record.setStyleSheet("border: 3px solied black;")
 
     
     # Воспроизведение записанного файла
