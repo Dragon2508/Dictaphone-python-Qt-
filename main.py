@@ -85,20 +85,6 @@ class Dictaphone(QtWidgets.QMainWindow):
 
         # Скрытие меню окна
         #self.setWindowFlag(QtCore.Qt.FramelessWindowHint)
-        #self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
-        
-        # Создание потока для записи звука
-        #self.record_new = Record()
-        #self.record_new.progress.connect(self.record_audio)
-        #self.record_new.finished.connect(self.record_new.deleteLater)
-        #thread_new = QThread()
-        #record_new.moveToThread(thread_new)
-        #thread_new.started.connect(record_new.run)  
-        #record_new.finished.connect(record_new.deleteLater)
-        #thread_new.finished.connect(thread_new.deleteLater)
-        #record_new.finished.connect(thread_new.quit)
-        #record_new.progress.connect(self.record_audio)
-
         
         self.pushButton_play.setIcon(QIcon("icons/play.png"))
         self.pushButton_play.clicked.connect(self.play_audio)
@@ -110,7 +96,7 @@ class Dictaphone(QtWidgets.QMainWindow):
         self.pushButton_delete.setIcon(QIcon("icons/bin.png"))
         self.pushButton_delete.clicked.connect(self.delete_audio)
 
-        self.widget_play.hide() # Скрытиеэкрана воспроизведения записи
+        self.widget_play.hide() # Скрытие экрана воспроизведения записи
         self.label_record.setText(str(datetime.time(self.time_hours, self.time_minutes, self.time_seconds))) # Установка пустого таймера
         
 
