@@ -1,7 +1,7 @@
 from PyQt5 import QtCore, QtWidgets, uic
 from PyQt5.QtGui import QPixmap, QIcon
 
-import datetime, sys, pyaudio, wave, threading, atexit, numpy as np
+import datetime, sys, pyaudio, wave, threading, atexit, sqlite3, os, numpy as np
 
 class MicrophoneRecorder(object):
 
@@ -46,13 +46,15 @@ class MicrophoneRecorder(object):
         self.stream.start_stream()
 
 
-    def close(self):
+    def close(self, value, time_record):
+
         # Остановка записи
         with self.lock:
             self.stop = True
         self.stream.stop_stream()
         self.stream.close()
         self.p.terminate()
+
         # Сохранение записи
         wf = wave.open("output_sound.wav", 'wb')
         wf.setnchannels(1)
@@ -60,6 +62,36 @@ class MicrophoneRecorder(object):
         wf.setframerate(44100)
         wf.writeframes(b''.join(self.get_frames()))
         wf.close()
+
+        # Добавление в базу данных
+        self.insert_blob(value, "output_sound.wav", time_record)
+
+        # Удаление файла из папки
+        os.remove("output_sound.wav")
+
+    # Конвертация в бинарный файл
+    def converter_to_binary_data(self, filename):
+        # Конвертировать данные в бинарный формат
+        with open(filename, 'rb') as file:
+            blob_data = file.read()
+        return blob_data
+    
+    # Вставка в бд
+    def insert_blob(self, id, audio, time):
+        try:
+            con = sqlite3.connect("Dictaphone.db")
+            cur = con.cursor()
+            bin_audio = self.converter_to_binary_data(audio)
+            query = """INSERT INTO Records (ID, AUDIO, TIME_RECORD) VALUES (?, ?, ?)"""
+            data_tuple = (id+1, bin_audio, time)
+            cur.execute(query, data_tuple)
+            con.commit()
+            cur.close()
+        except sqlite3.Error as error:
+            print('Ошибочка с запросиком к БД...', error)
+        finally:
+            if con:
+                con.close()
 
 
 class Dictaphone(QtWidgets.QMainWindow):
@@ -73,9 +105,9 @@ class Dictaphone(QtWidgets.QMainWindow):
         uic.loadUi('form.ui', self) # Загрузка Ui
 
         # Настройка формы
-        timer = QtCore.QTimer(self)
-        timer.setInterval(1000)                                                    
-        timer.timeout.connect(self.displayTime)
+        self.timer = QtCore.QTimer(self)
+        self.timer.setInterval(1000)                                                    
+        self.timer.timeout.connect(self.displayTime)
 
         self.label_center.setPixmap(QPixmap("icons/select.png"))
         self.label_up.setPixmap(QPixmap("icons/up.png"))
@@ -89,16 +121,26 @@ class Dictaphone(QtWidgets.QMainWindow):
         self.pushButton_play.setIcon(QIcon("icons/play.png"))
         self.pushButton_play.clicked.connect(self.play_audio)
         self.pushButton_record.setIcon(QIcon("icons/record.png"))
-        self.pushButton_record.clicked.connect(lambda: self.start_time_record(timer))
-        self.pushButton_record.clicked.connect(lambda: self.start_record_audio())
+        self.pushButton_record.clicked.connect(self.check_DB_records)
         self.pushButton_pause.setIcon(QIcon("icons/pause.png"))
-        self.pushButton_pause.clicked.connect(lambda: self.pause_audio(timer))
+        self.pushButton_pause.clicked.connect(lambda: self.pause_audio(self.timer))
         self.pushButton_delete.setIcon(QIcon("icons/bin.png"))
         self.pushButton_delete.clicked.connect(self.delete_audio)
 
-        self.widget_play.hide() # Скрытие экрана воспроизведения записи
         self.label_record.setText(str(datetime.time(self.time_hours, self.time_minutes, self.time_seconds))) # Установка пустого таймера
         
+
+    def check_DB_records(self):
+        con = sqlite3.connect('Dictaphone.db')
+        cur = con.cursor()
+        query = """SELECT count(*)  From Records"""
+        cur.execute(query)
+        value = cur.fetchall()[0][0]
+        if value > 9:
+            self.label_record.setText('Нетодасточно памяти.\n Очистите список записей.')
+        else:
+            self.start_record_audio(value, self.label_record.text())
+            self.start_time_record(self.timer)
 
     def start_time_record(self, timer):
         # Обнуление счётчиков
@@ -128,9 +170,9 @@ class Dictaphone(QtWidgets.QMainWindow):
 
     
     # Запись файла
-    def start_record_audio(self):
+    def start_record_audio(self,value, time_record):
         if(self.pushButton_record.styleSheet() == "border: 3px solied black;"):
-            self.mic.close()
+            self.mic.close(value,time_record)
             self.pushButton_record.setStyleSheet("")
         else:
             self.mic = MicrophoneRecorder()
@@ -145,10 +187,13 @@ class Dictaphone(QtWidgets.QMainWindow):
 
     # Пауза 
     def pause_audio(self, timer):
-        if timer.isActive():
-            timer.stop()
+        if(self.label_record.text() == ('Нетодасточно памяти.\n Очистите список записей.')):
+            return
         else:
-            timer.start()
+            if timer.isActive():
+                timer.stop()
+            else:
+                timer.start()
 
     # Удалить запись
     def delete_audio(self):
