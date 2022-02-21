@@ -21,6 +21,8 @@ class MicrophoneRecorder(object):
         atexit.register(self.close)
 
 
+    
+    
     def new_frame(self, data, frame_count, time_info, status):
         #data = np.fromstring(data, 'int16')
         data = np.frombuffer(data, 'int16')
@@ -31,6 +33,8 @@ class MicrophoneRecorder(object):
         return None, pyaudio.paContinue
     
 
+    
+    
     def get_frames(self):
         with self.lock:
             frames = self.frames
@@ -38,6 +42,8 @@ class MicrophoneRecorder(object):
             return frames
     
 
+    
+    
     def pause(self):
         if (self.stream.is_active()):
             self.stream.stop_stream()
@@ -45,6 +51,8 @@ class MicrophoneRecorder(object):
             self.stream.start_stream()
 
 
+    
+    
     def start(self):
         # Очистка ранее записанных аудио
         self.frames = []
@@ -52,6 +60,8 @@ class MicrophoneRecorder(object):
         self.stream.start_stream()
 
 
+    
+    
     def close(self, time_record):
         # Остановка записи
         with self.lock:
@@ -75,6 +85,8 @@ class MicrophoneRecorder(object):
         os.remove("list_records/output_sound.wav")
 
 
+    
+    
     # Конвертация в бинарный файл
     def converter_to_binary_data(self, filename):
         # Конвертировать данные в бинарный формат
@@ -83,6 +95,8 @@ class MicrophoneRecorder(object):
         return blob_data
     
 
+    
+    
     # Вставка в БД
     def insert_blob(self, audio, time):
         try:
@@ -161,14 +175,18 @@ class Dictaphone(QtWidgets.QMainWindow):
         self.listWidget.setSortingEnabled(False)
         
 
+    
+    
     # Включение режима сбережении энергии
     def counter_energy_saving(self):
         self.count_timer += 1
-        if self.count_timer == 30:
+        if self.count_timer == 30: # Для тестирования, а то блокируется раньше времени
             self.setStyleSheet("background:lightgray;")
             # Увеличиваем время работы от батареи
             self.timer_battary.setInterval(20000) # 20 сек
 
+    
+    
     
     # Обнуление счётчика сбережения энергии
     def zeroing_energy_saving(self):
@@ -178,6 +196,8 @@ class Dictaphone(QtWidgets.QMainWindow):
         self.timer_battary.setInterval(10000) # 10 сек
 
 
+    
+    
     # Расход батареи
     def counter_timer_battary(self):
         self.count_timer_battary -= 1
@@ -186,8 +206,13 @@ class Dictaphone(QtWidgets.QMainWindow):
             self.setEnabled(False)
         elif(self.count_timer_battary > 10):
             self.setEnabled(True)
+        # Остановка таймера если села батарейка    
+        if(self.count_timer_battary == 0):
+            self.timer_battary.stop()
 
 
+    
+    
     # Получение списка записанных файлов
     def get_list_record(self):
         if(self.tabWidget.currentIndex() == 1):
@@ -198,17 +223,35 @@ class Dictaphone(QtWidgets.QMainWindow):
             self.listWidget.clear()
 
             # Цикл по файлам папки
-            folder = sorted(os.listdir('list_records/'))
+            folder = os.listdir('list_records/')
+            
+            # Формирования списка записей для новой сортировки
+            list_sort = []
+            for file in folder:
+                id_record = file.split('.')[0] # Номер записи (str)
+                if (len(id_record) > 1):
+                    list_sort.append(id_record + '.wav')
+            
+            # Изменение позиций записи
+            for item in list_sort:
+                folder.remove(item)
+                folder.append(item)
+
+            # Формирование списка на форме
             i = 0
             for file in folder:
+                id_record = file.split('.')[0] # Номер записи (str)
                 if file.endswith('.wav'):
                     #Создание списка
-                    id_record = file.split('.')[0] # Номер записи (str)
                     item = QtWidgets.QListWidgetItem()
                     item.setText('Запись_' + id_record + '\t' + list_times[i])
+                    #list_times.remove(list_times[i])
                     self.listWidget.addItem(item)
                     i += 1
 
+
+    
+    
     
     # Получение файла из бинарника
     def write_to_file(self, data, filename):
@@ -334,9 +377,11 @@ class Dictaphone(QtWidgets.QMainWindow):
 
         if self.tabWidget.currentIndex() == 0 and type(self.listWidget.item(self.listWidget.currentRow())) == QtWidgets.QListWidgetItem and datetime.time(self.record_time_hours, self.record_time_minutes, self.record_time_seconds) > datetime.time(self.time_hours, self.time_minutes, self.time_seconds):
             if pygame.mixer.music.get_busy() == True:
+                self.pushButton_pause.setStyleSheet("background: lightgray;")
                 timer.stop()
                 pygame.mixer.music.pause()
             else:
+                self.pushButton_pause.setStyleSheet("")
                 timer.start()
                 pygame.mixer.music.unpause()
         elif self.tabWidget.currentIndex() == 1:
@@ -344,8 +389,10 @@ class Dictaphone(QtWidgets.QMainWindow):
                 return
             else:
                 if timer.isActive():
+                    self.pushButton_pause.setStyleSheet("background: lightgray;")
                     timer.stop()
                 else:
+                    self.pushButton_pause.setStyleSheet("")
                     timer.start()
                 self.mic.pause()
 
@@ -396,7 +443,7 @@ class Dictaphone(QtWidgets.QMainWindow):
         self.time_hours = 0
         self.time_minutes = 0
         self.time_seconds = 0
-        self.label_play.setText(str(datetime.time(self.time_hours, self.time_minutes, self.time_seconds)))
+        self.label_record.setText(str(datetime.time(self.time_hours, self.time_minutes, self.time_seconds)))
         # Отмена загрузки воспроизводимой записи
         pygame.mixer.music.unload()
         # Переход
